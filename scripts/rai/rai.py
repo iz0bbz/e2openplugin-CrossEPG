@@ -55,14 +55,18 @@ class Titolo_parser(sgmllib.SGMLParser):
 		self.start_titolo = False
 		self.inside_a_titolo = False
 		self.inside_palinsesto = False
-
-
+		self.start_descrizione = False
+		self.start_sommario = False
+		
 	def start_div(self,attributes):
 		for name,value in attributes:
 			if name == "class":
 				if value == "intG":
 					self.inside_palinsesto = True
-
+				if self.inside_palinsesto == True:
+					if value == "eventDescription":
+						self.start_descrizione = True
+					
 	def start_span(self, attributes):
 		if self.inside_palinsesto == True:
 			for name, value in attributes:
@@ -71,7 +75,13 @@ class Titolo_parser(sgmllib.SGMLParser):
 						self.start_orario = True
 					if value == "info":
 						self.start_titolo = True
-
+		if 	self.start_descrizione == True:
+			for name, value in attributes:
+				if name == "class":
+					if value == "solotesto":	
+						self.start_sommario = True
+					
+						
 	def start_a(self,attributes):
 		if self.inside_palinsesto == True:
 			if self.start_titolo == True:
@@ -91,21 +101,30 @@ class Titolo_parser(sgmllib.SGMLParser):
 						self.inside_a_titolo = False
 						self.start_titolo = False
 						self.inside_palinsesto = False
+						self.start_descrizione = False
+						self.start_sommario = False
 						return
 
 				self.dataoraevento = time.strftime("%Y-%m-%d %H:%M",time.strptime(self.day+'-'+data,"%Y%m%d-%H:%M"))
 				self.start_orario = False
 
+			
 			if self.inside_a_titolo == True:
-				if self.tomorrow == False:
-					self.guidatoday.append((self.dataoraevento,data.strip()))
-				else:
-					self.guidatomorrow.append((self.dataoraevento,data.strip()))
-
+				self.titolo =  data.strip()
 				self.inside_a_titolo = False
 				self.start_titolo = False
-				self.inside_palinsesto = False
+			
+			if self.start_sommario == True:
+				self.sommario = data.strip()
+				if self.tomorrow == False:
+					self.guidatoday.append((self.dataoraevento,self.titolo,self.sommario))
+				else:
+					self.guidatomorrow.append((self.dataoraevento,self.titolo,self.sommario))
 
+				self.inside_palinsesto = False
+				self.start_descrizione = False
+				self.start_sommario = False
+			
 
 	def get_guida(self):
 		return ((self.guidatoday,self.guidatomorrow))
@@ -302,7 +321,7 @@ class main:
 					exit_for_loop = True
 					continue
 
-				self.log.log("Download HTML data from \'%s?%s\'" % (self.CONF_URL,xmlfile))
+				self.log.log("Download HTML data from \'%s/%s.html\'" % (self.CONF_URL,xmlfile))
 				self.log.log2video_status("downloading %s" % xmlfile)
 
 				i = self.HTTP_ERROR_RETRY
@@ -311,7 +330,7 @@ class main:
 					time.sleep(random.uniform(self.CONF_RANDOM_MIN, self.CONF_RANDOM_MAX))
 
 					try:
-						sock=urllib2.urlopen(self.CONF_URL + '?' + xmlfile)
+						sock=urllib2.urlopen(self.CONF_URL + '/' + xmlfile + '.html')
 						data=sock.read()
 
 					except IOError, e:
@@ -351,7 +370,7 @@ class main:
 
 						# extract all events and put in eventfile
 						for event in self.guida:
-							(dataora,titolo) = event
+							(dataora,titolo,sommario) = event
 							event_starttime = dataora
 							# time.mktime return Unix time inside GMT timezone
 							event_startime_unix_gmt = str(int(time.mktime(time.strptime(event_starttime,"%Y-%m-%d %H:%M"))) - self.DELTA_UTC )
@@ -360,12 +379,15 @@ class main:
 
 							# convert remote data (RAI website use UTF-8) in Python Unicode (UCS2)
 							event_title = unicode(titolo,self.REMOTE_EPG_CHARSET)
-
 							event_title = event_title.replace('\r','')
 							event_title = event_title.replace('\n',u' ')
 							event_title = event_title.strip(u' ')
 
-							event_description = u''
+							event_description = unicode(sommario,self.REMOTE_EPG_CHARSET)
+							event_description = event_description.replace('\r','')
+							event_description = event_description.replace('\n',u' ')
+							event_description = event_description.strip(u' ')
+							
 
 							fd.write(event_starttime + self.FIELD_SEPARATOR + event_startime_unix_gmt + self.FIELD_SEPARATOR + event_title + self.FIELD_SEPARATOR + event_description + '\n')
 
@@ -447,12 +469,7 @@ class main:
 
 							# extract title and encode Python Unicode with UTF-8
 							e_title = e.split(self.FIELD_SEPARATOR)[2].encode('utf-8')
-
-							# RAI website HAVE NOT long description. (bleah !).
-							e_summarie = u' '
-							# encode Python Unicode in UTF-8
-							e_summarie = e_summarie.encode('utf-8')
-
+							e_summarie = e.split(self.FIELD_SEPARATOR)[3].encode('utf-8')
 							# add_event(start_time , duration , title , summarie , ISO639_language_code , strings_encoded_with_UTF-8)
 							crossdb.add_event(e_starttime, e_length, e_title, e_summarie, 'ita', True )
 
